@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>El Gran Taco - Diagnóstico PD01 v2</title>
+<style>
+:root{font-family:system-ui,Arial;color:#1c1917;background:#f5f5f4}*{box-sizing:border-box}body{margin:0}header{background:#171717;color:#facc15;padding:18px 16px}header h1{margin:0;font-size:23px}header p{margin:5px 0;color:#e5e5e5}main{max-width:780px;margin:auto;padding:16px;display:grid;gap:14px}.panel{background:white;border:1px solid #e5e5e5;border-radius:14px;padding:16px}h2{font-size:17px;margin:0 0 12px}.muted{color:#57534e;font-size:13px}.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}button,select{font:inherit;border-radius:10px;padding:11px 14px}button{background:#171717;color:white;border:0;cursor:pointer;font-weight:700}button.secondary{background:#2563eb}button.warn{background:#a16207}button:disabled{opacity:.45}select{max-width:100%;width:100%;background:white;border:1px solid #a8a29e}#state{font-weight:700}.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.kpi{background:#f5f5f4;border-radius:10px;padding:12px;text-align:center}.num{font-size:23px;font-weight:800}.label{font-size:12px}.entry{padding:9px;border-bottom:1px solid #e7e5e4;display:flex;justify-content:space-between;gap:8px}.entry small{display:block;color:#78716c}pre{white-space:pre-wrap;word-break:break-word;background:#1c1917;color:#e7e5e4;padding:12px;border-radius:8px;max-height:190px;overflow:auto;font-size:12px}.good{color:#15803d}.bad{color:#b91c1c}
+</style></head><body><header><h1>🌮 EL GRAN TACO</h1><p>Tablet de impresión • PD01 • Rollo 58 mm</p></header>
+<main>
+<section class="panel"><h2>1. Diagnóstico PD01 v2 — Bluetooth y motor</h2><div class="row"><button id="connect">Buscar y conectar PD01</button><button class="secondary" id="reconnect">Reconectar autorizada</button></div>
+<p class="muted" id="state">Sin conectar. Usa Chrome Android y sitio HTTPS.</p>
+<label class="muted" for="channel">Canal de escritura detectado:</label><select id="channel"><option value="">Primero conecta la impresora</option></select>
+<div class="row" style="margin-top:12px"><button id="feed" class="secondary" disabled>1. Probar avance de papel</button><button id="test" class="secondary" disabled>2. Imprimir patrón (modo A)</button><button id="modeb" class="secondary" disabled>3. Imprimir patrón (modo B)</button></div><p class="muted">Prueba 1: solo motor. Pruebas 2 y 3: envían una franja corta con configuraciones alternativas. Ejecuta una a la vez; si una imprime, no ejecutes las demás.</p>
+<p class="muted">Protocolo PD01 51 78; canal AE30/AE01. El estado Bluetooth conectado no asegura que el mecanismo imprima. Si ninguna prueba mueve papel, copia el diagnóstico para revisar respuestas y estado físico.</p></section>
+<section class="panel"><h2>2. Servidor de impresión</h2><p class="muted" style="color:#b91c1c;font-weight:700">La cola se mantendrá desactivada hasta confirmar la impresión física de prueba. El formato ESC/POS de los tickets anteriores requiere conversión a imagen.</p><div class="row"><button id="start" disabled>Activar servidor</button><button id="stop" class="warn" disabled>Detener</button><span id="workerState" class="muted">Detenido</span></div>
+<p class="muted">Conserva Chrome abierto en primer plano, pantalla encendida y conexión a Internet. Una transmisión completada no confirma que el papel haya salido; verifica el ticket antes de reimprimir.</p>
+<div class="kpis"><div class="kpi"><div class="num" id="pending">—</div><div class="label">Pendientes</div></div><div class="kpi"><div class="num" id="sent">—</div><div class="label">Enviados</div></div><div class="kpi"><div class="num" id="review">—</div><div class="label">Revisión</div></div></div>
+<h2 style="margin-top:16px">Últimos trabajos</h2><div id="jobs" class="muted">Esperando datos de Supabase...</div><button id="refresh" class="secondary">Actualizar cola</button></section>
+<section class="panel"><h2>3. Diagnóstico y errores</h2><div class="row"><button id="copylog" class="secondary">Copiar diagnóstico</button></div><pre id="log">Servidor preparado. Aún no hay una conexión física verificada.</pre></section>
+</main><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><script>
+const SUPABASE_URL='https://pemapfwfzjqrqwrdvvzu.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBlbWFwZndmempxcnF3cmR2dnp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMwMjQ4NTUsImV4cCI6MjEwODYwMDg1NX0.y4W3aV9CfdcnDWqJoc2ai-U34h0CR9LpJClzBTAiZ2k';
+const SERVICES=[
+            '000018f0-0000-1000-8000-00805f9b34fb',
+            '0000ff00-0000-1000-8000-00805f9b34fb',
+            '0000ae30-0000-1000-8000-00805f9b34fb',
+            '49535343-fe7d-4ae5-8fa9-9fafd205e455',
+            '0000ffe0-0000-1000-8000-00805f9b34fb',
+            'e7810a71-73ae-499d-8c15-faa9aef0c3f2'
+        ];
+const PRIORITY=[
+ '00002af1-0000-1000-8000-00805f9b34fb','0000ff02-0000-1000-8000-00805f9b34fb',
+ '0000ae01-0000-1000-8000-00805f9b34fb','49535343-8841-43f4-a8d4-ecbe34729bb3',
+ '0000ffe1-0000-1000-8000-00805f9b34fb'
+];
+const db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+const $=id=>document.getElementById(id);
+let device=null,channels=[],running=false,busy=false,timer=null,verified=false,notifiers=[];
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+function log(s){$('log').textContent=`${new Date().toLocaleTimeString()} ${s}\n`+$('log').textContent.slice(0,6500)}
+function status(s,good=false){$('state').textContent=s;$('state').className=good?'good':'bad'}
+function bytesBase64(input){const bin=atob(input);return Uint8Array.from(bin,c=>c.charCodeAt(0))}
+function getSelected(){return channels[Number($('channel').value)]}
+function isPD01Channel(){return !!getSelected() && getSelected().c.uuid.toLowerCase().startsWith('0000ae01') && getSelected().service.toLowerCase().startsWith('0000ae30');}
+function updateBtns(){const connected=!!(device?.gatt?.connected && channels.length && getSelected());$('test').disabled=!connected;$('feed').disabled=!connected;$('modeb').disabled=!connected;$('start').disabled=true;$('stop').disabled=!running;}
+async function bindDevice(d){device=d;d.addEventListener('gattserverdisconnected',()=>{status('Se desconectó la impresora');stop();channels=[];updateBtns();});
+const server=await d.gatt.connect();channels=[];notifiers=[];verified=false;
+for(const service of await server.getPrimaryServices()){
+ for(const c of await service.getCharacteristics()){
+  log('Servicio '+service.uuid+' | Canal '+c.uuid+' | write='+c.properties.write+' | writeWithoutResponse='+c.properties.writeWithoutResponse);
+  if(c.properties.write||c.properties.writeWithoutResponse)channels.push({c,service:service.uuid});
+  if(c.properties.notify && /ae02|ae04/i.test(c.uuid)){try{await c.startNotifications();c.addEventListener('characteristicvaluechanged', ev=>{const v=ev.target.value;const hex=Array.from(new Uint8Array(v.buffer,v.byteOffset,v.byteLength),x=>x.toString(16).padStart(2,'0')).join(' ');log('PD01 RESPUESTA '+hex);});notifiers.push(c);log('Notificaciones activadas en '+c.uuid)}catch(e){log('No se pudieron activar notificaciones '+c.uuid+': '+e.message)}}
+ }
+}
+channels.sort((a,b)=>{const i=PRIORITY.indexOf(a.c.uuid.toLowerCase()),j=PRIORITY.indexOf(b.c.uuid.toLowerCase());return (i<0?999:i)-(j<0?999:j)});
+$('channel').replaceChildren();channels.forEach((x,i)=>{const opt=document.createElement('option');opt.value=i;opt.textContent=x.service.slice(0,8)+' / '+x.c.uuid.slice(0,8)+(x.c.properties.write?' (write)':' (sin respuesta)');$('channel').append(opt)});
+if(!channels.length)throw Error('No se encontró canal escribible. Posible Bluetooth clásico, no BLE.');
+status('Conectada a '+(d.name||'impresora')+' • usa Prueba PD01 5178',true);log('Conectada. Canales disponibles: '+channels.length);updateBtns();}
+$('connect').onclick=async()=>{if(!navigator.bluetooth){status('Web Bluetooth no disponible: usa Chrome Android en HTTPS');return;}try{const d=await navigator.bluetooth.requestDevice({acceptAllDevices:true,optionalServices:SERVICES});await bindDevice(d)}catch(e){status('Conexión fallida: '+e.message);log('Error: '+e.message)}};
+$('reconnect').onclick=async()=>{try{if(!navigator.bluetooth?.getDevices)throw Error('Este Chrome no admite reconexión autorizada');let ds=await navigator.bluetooth.getDevices();if(!ds.length)throw Error('No hay dispositivos previamente autorizados. Usa Buscar.');await bindDevice(ds.find(d=>/pd01/i.test(d.name))||ds[0]);}catch(e){status(e.message);log(e.message)}};
+$('channel').onchange=updateBtns;
+async function transmit(bytes){const item=getSelected();if(!item||!device?.gatt?.connected)throw Error('Impresora desconectada');const c=item.c;
+const payload=new Uint8Array(bytes.length+4);payload.set(bytes);payload.set([10,10,10,10],bytes.length);
+for(let i=0;i<payload.length;i+=20){const chunk=payload.slice(i,i+20);if(c.properties.write)await c.writeValueWithResponse(chunk);else await c.writeValueWithoutResponse(chunk);await delay(35);}
+}
+function testBytes(){const encoder=new TextEncoder();const text=encoder.encode('EL GRAN TACO\nPRUEBA DE IMPRESION PD01\n1234567890\n------------------------\n\n\n');return Uint8Array.from([27,64,...text]);}
+// Protocolo PD01 (0x51 0x78). Este test NO usa ESC/POS.
+function crc8(data){let crc=0;for(const x of data){crc^=x;for(let i=0;i<8;i++)crc=(crc&0x80)?((crc<<1)^7)&255:(crc<<1)&255;}return crc;}
+function pdPacket(cmd,data=[]){const b=Uint8Array.from(data);return Uint8Array.from([0x51,0x78,cmd,0,b.length&255,(b.length>>8)&255,...b,crc8(b),0xff]);}
+const fromHex=h=>Uint8Array.from(h.trim().split(/\s+/).map(x=>parseInt(x,16)));
+async function sendPD(bytes){const item=getSelected();if(!item||!device?.gatt?.connected)throw Error('PD01 no conectada');const c=item.c;
+ for(let i=0;i<bytes.length;i+=20){const chunk=bytes.slice(i,i+20);if(c.properties.writeWithoutResponse)await c.writeValueWithoutResponse(chunk);else await c.writeValueWithResponse(chunk);await delay(25);}
+}
+function pdTestRows(){const can=document.createElement('canvas');can.width=384;can.height=94;const ctx=can.getContext('2d',{willReadFrequently:true});ctx.fillStyle='#fff';ctx.fillRect(0,0,384,94);ctx.fillStyle='#000';ctx.fillRect(12,5,360,5);ctx.textAlign='center';ctx.font='bold 38px Arial';ctx.fillText('PD01',192,51);ctx.font='bold 17px Arial';ctx.fillText('EL GRAN TACO',192,76);ctx.fillRect(12,85,360,4);
+ const rgba=ctx.getImageData(0,0,384,94).data;const rows=[];for(let y=0;y<94;y++){const row=new Uint8Array(48);for(let x=0;x<384;x++){const pos=(y*384+x)*4; if(rgba[pos]<128)row[x>>3]|=1<<(x%8);}rows.push(row);}return rows;}
+const PD_LATTICE_START=fromHex('51 78 a6 00 0b 00 aa 55 17 38 44 5f 5f 5f 44 38 2c a1 ff');
+const PD_LATTICE_END=fromHex('51 78 a6 00 0b 00 aa 55 17 00 00 00 00 00 00 00 17 11 ff');
+const pdHex=data=>Array.from(data,x=>x.toString(16).padStart(2,'0')).join(' ');
+let testInProgress=false;
+async function pdCommand(command,data){const bytes=pdPacket(command,data);log('TX comando '+command.toString(16)+' datos='+pdHex(Uint8Array.from(data))+' crc='+bytes[bytes.length-2].toString(16));await sendPD(bytes);}
+async function feedOnly(){if(!isPD01Channel())throw Error('Selecciona canal AE30 / AE01');log('PRUEBA MOTOR: avance solicitado, sin imagen ni calor');await pdCommand(0xa3,[0]);await delay(300);await pdCommand(0xa1,[0x40,0]);await delay(1400);await pdCommand(0xa3,[0]);log('Fin prueba motor: comprueba si el papel se desplazó');}
+async function imageTest(mode){if(!isPD01Channel())throw Error('Selecciona canal AE30 / AE01');
+ log('PRUEBA IMAGEN modo '+mode+'; una franja de prueba de 384 puntos');
+ await pdCommand(0xa3,[0]);await delay(300);
+ await pdCommand(0xa4,[mode==='A'?0x32:0x33]);
+ const energy=mode==='A'?12000:17500;
+ await pdCommand(0xaf,[energy&255,(energy>>8)&255]);
+ await pdCommand(0xbe,[mode==='A'?1:0]);
+ await pdCommand(0xbd,[0x23]); // velocidad de imagen antes de los datos
+ await sendPD(PD_LATTICE_START);await delay(150);
+ const rows=pdTestRows();for(let y=0;y<rows.length;y++){
+  await sendPD(pdPacket(0xa2,rows[y]));
+  if(y%16===0)log('Fila '+(y+1)+'/'+rows.length);
+  await delay(mode==='A'?50:75);
+ }
+ await sendPD(PD_LATTICE_END);await delay(350);
+ await pdCommand(0xbd,[0x19]);
+ await pdCommand(0xa1,[0x40,0]); await delay(1100);
+ await pdCommand(0xa3,[0]);
+ log('FIN modo '+mode+'. Si no salió nada, copia el diagnóstico. El envío NO confirma impresión.');
+}
+async function runTest(label,fn){if(testInProgress)return;testInProgress=true;['test','feed','modeb'].forEach(id=>$(id).disabled=true);log('--- '+label+' ---');try{await fn();alert(label+' finalizada. Comprueba físicamente el papel y comparte qué ocurrió.');}catch(e){log('ERROR '+label+': '+e.message);alert('Error: '+e.message);}finally{testInProgress=false;updateBtns();}}
+$('feed').onclick=()=>runTest('Prueba motor',feedOnly);
+$('test').onclick=()=>runTest('Imagen modo A',()=>imageTest('A'));
+$('modeb').onclick=()=>runTest('Imagen modo B',()=>imageTest('B'));
+$('copylog').onclick=async()=>{const result='Dispositivo: '+(device?.name||'Sin conectar')+'\nCanales:\n'+channels.map(x=>x.service+' / '+x.c.uuid+' write='+x.c.properties.write+' withoutResponse='+x.c.properties.writeWithoutResponse).join('\n')+'\nLog:\n'+$('log').textContent;try{await navigator.clipboard.writeText(result);alert('Diagnóstico copiado. Pégalo en el chat.');}catch(e){alert('No se pudo copiar: selecciona manualmente el texto del diagnóstico.')}};
+$('raw').onclick=()=>{const b=testBytes();let text='';for(let i=0;i<b.length;i++)text+=String.fromCharCode(b[i]);location.href='rawbt:base64,'+btoa(text);};
+async function refresh(){try{const {data,error}=await db.from('gt_impresiones').select('id,mesa,tipo,estado,creado_en,error_detalle').order('id',{ascending:false}).limit(25);if(error)throw error;
+$('pending').textContent=data.filter(x=>x.estado==='pendiente').length+(data.length===25?'*':'');$('sent').textContent=data.filter(x=>x.estado==='enviado').length+(data.length===25?'*':'');$('review').textContent=data.filter(x=>['revision','error'].includes(x.estado)).length+(data.length===25?'*':'');
+const root=$('jobs');root.replaceChildren();for(const x of data.slice(0,10)){const row=document.createElement('div');row.className='entry';const label=document.createElement('div');label.textContent='#'+x.id+' • '+(x.mesa||'Sin mesa');const small=document.createElement('small');small.textContent=new Date(x.creado_en).toLocaleString()+' • '+x.tipo;label.append(small);const stat=document.createElement('span');stat.textContent=x.estado;row.append(label,stat);root.append(row);}if(!data.length)root.textContent='No hay trabajos todavía';}catch(e){log('Consulta de cola: '+e.message);$('jobs').textContent='No se puede leer la cola. ¿Ejecutaste el SQL? '+e.message}}
+async function processOne(){if(busy||!running||!device?.gatt?.connected)return;busy=true;let job=null;try{const {data,error}=await db.rpc('gt_tomar_siguiente_impresion');if(error)throw error;job=data?.[0];if(!job)return;
+log('Enviando ticket #'+job.id+' • '+job.mesa);try{await transmit(bytesBase64(job.contenido_base64));const {error:err}=await db.from('gt_impresiones').update({estado:'enviado',enviado_en:new Date().toISOString(),actualizado_en:new Date().toISOString(),error_detalle:null}).eq('id',job.id).eq('estado','imprimiendo');if(err)throw err;log('Ticket #'+job.id+' transmitido (salida física sin verificar).');}catch(e){log('Ticket #'+job.id+' requiere revisión: '+e.message);await db.from('gt_impresiones').update({estado:'revision',actualizado_en:new Date().toISOString(),error_detalle:String(e.message||e).slice(0,500)}).eq('id',job.id);stop();}
+}catch(e){log('Error en cola: '+e.message);stop();}finally{busy=false;await refresh();}}
+function stop(){running=false;if(timer)clearInterval(timer);timer=null;$('workerState').textContent='Detenido';updateBtns()}
+$('start').onclick=()=>{alert('La cola aún no está habilitada: primero debemos comprobar una prueba de impresión PD01 y adaptar los tickets ESC/POS a imagen.');return;if(!getSelected()||!device?.gatt?.connected)return;running=true;$('workerState').textContent='Servidor activo • Chrome en primer plano';updateBtns();processOne();timer=setInterval(processOne,3500);log('Servidor activado');};
+$('stop').onclick=stop;$('refresh').onclick=refresh;refresh();setInterval(refresh,12000);
+</script></body></html>
